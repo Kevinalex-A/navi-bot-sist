@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campus Map with Pathfinding</title>
+    <style>
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+    </style>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCSg_Xu0Lt24Y7WyK30OTXtTmb67gbDN-k&libraries=geometry&callback=initMap" async defer></script>
+    <script>
+        let map;
+        let polylines = [];
+        const graph = {};
+        let highlightedPath = null;
+
+        function initMap() {
+            const locations = {
+                "A": { lat: 12.871627620376513, lng: 80.21990230264763 },
+                "B": { lat: 12.871357673608909, lng: 80.22108199297492 },
+                "C": { lat: 12.871190138568993, lng: 80.22188184840775 },
+                "D": { lat: 12.871053316032322, lng: 80.2228225660964 },
+                "E": { lat: 12.870838837309105, lng: 80.22400984281501 },
+                "F": { lat: 12.871973773596293, lng: 80.21875837045675 },
+                "G": { lat: 12.873586050132726, lng: 80.21927424789436 },
+                "H": { lat: 12.873157096839943, lng: 80.21989254218167 },
+                "I": { lat: 12.87302027537999, lng: 80.22056014825934 },
+                "J": { lat: 12.87291673476354, lng: 80.22088636487716 },
+                "K": { lat: 12.873563862925572, lng: 80.22069291081634 },
+                "L": { lat: 12.87372656916937, lng: 80.2200025454158 },
+                "M": { lat: 12.873867088114379, lng: 80.21929321394971 },
+                "N": { lat: 12.87500233038697, lng: 80.22168673352012 },
+                "O": { lat: 12.87435150809023, lng: 80.22153121164418 },
+                "P": { lat: 12.870531105251846, lng: 80.21964413165101 },
+                "Q": { lat: 12.872282886931236, lng: 80.22142185660726 },
+                "R": { lat: 12.872428006244888, lng: 80.22075875136221 },
+                "S": { lat: 12.872568727923362, lng: 80.2201046679572 },
+                "T": { lat: 12.872854568589606, lng: 80.21911677646966 },
+                "U": { lat: 12.872167511430147, lng: 80.22201116424104 },
+                "V": { lat: 12.873358463671309, lng: 80.22224082279553 },
+                "W": { lat: 12.873392668492816, lng: 80.22168900433621 },
+                "X": { lat: 12.873977259087972, lng: 80.22153908833536 },
+                "1": { lat: 12.872798747928382, lng: 80.22158055446326 },
+                "2": {lat:12.873266059089861, lng:80.21921053958437}
+            };
+            const connections = [
+                ["N", "O"], ["O", "X"], ["X", "W"], ["W", "V"], ["V", "U"], ["U", "C"],
+                ["C", "D"], ["D", "E"], ["C", "B"], ["B", "A"], ["A", "P"], ["A", "F"],
+                ["A", "S"], ["S", "T"], ["S", "R"], ["S", "I"], ["R", "J"], ["R", "Q"],
+                ["T", "G"], ["G", "M"], ["M", "L"], ["L", "K"], ["K", "W"], ["Q", "1"],
+                ["1", "W"], ["I", "J"], ["H", "I"], ["H", "L"], ["F", "T"], ["B", "Q"],
+                ["Q", "U"],["J","1"],["2","H"],["T","2"],["K","I"]
+            ];
+
+            // Initialize graph and map
+            initializeGraph(connections, locations);
+            createBaseMap(locations, connections);
+            addControls(Object.keys(locations));
+            setupBanners();
+        }
+
+        function initializeGraph(connections, locations) {
+            connections.forEach(([start, end]) => {
+                if (!graph[start]) graph[start] = {};
+                if (!graph[end]) graph[end] = {};
+                
+                const distance = google.maps.geometry.spherical.computeDistanceBetween(
+                    new google.maps.LatLng(locations[start]),
+                    new google.maps.LatLng(locations[end])
+                );
+                
+                graph[start][end] = distance;
+                graph[end][start] = distance;
+            });
+        }
+
+        function createBaseMap(locations, connections) {
+            map = new google.maps.Map(document.getElementById("map"), {
+                zoom: 16,
+                center: { lat: 12.872, lng: 80.220 },
+                disableDefaultUI: true
+            });
+
+            // Add original markers
+            Object.entries(locations).forEach(([name, position]) => {
+                new google.maps.Marker({
+                    position,
+                    map,
+                    title: name,
+                    label: name,
+                    icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 8,
+                        fillColor: "red",
+                        fillOpacity: 1,
+                        strokeWeight: 1
+                    }
+                });
+            });
+
+            // Store all polylines for path highlighting
+            connections.forEach(([start, end]) => {
+                const polyline = new google.maps.Polyline({
+                    path: [locations[start], locations[end]],
+                    geodesic: true,
+                    strokeColor: "#0000FF",
+                    strokeOpacity: 1.0,
+                    strokeWeight: 3,
+                    map: map
+                });
+                polylines.push({start, end, polyline});
+            });
+        }
+
+        function setupBanners() {
+            const colors = ["#FF0000", "#FF9900", "#FFFF00", "#33CC33", "#3399FF", "#9900CC"];
+            let colorIndex = 0;
+
+            const banners = [
+                // ... (keep all your existing banner definitions) ...
+                { marker: createBanner(map, "Library", 12.873616248906009, 80.21909511705476) }
+            ];
+
+            function updateBannerColors() {
+                colorIndex = (colorIndex + 1) % colors.length;
+                banners.forEach(banner => {
+                    banner.marker.setLabel({
+                        text: banner.marker.getTitle(),
+                        color: colors[colorIndex],
+                        fontSize: "18px",
+                        fontWeight: "bold"
+                    });
+                });
+                setTimeout(updateBannerColors, 1000);
+            }
+
+            updateBannerColors();
+        }
+
+        function createBanner(map, title, lat, lng) {
+            return new google.maps.Marker({
+                position: { lat, lng },
+                map: map,
+                title: title,
+                icon: { path: google.maps.SymbolPath.CIRCLE, scale: 0 }
+            });
+        }
+
+        function addControls(points) {
+            const controls = document.createElement('div');
+            controls.id = 'controls';
+            controls.innerHTML = `
+                <h3>Find Shortest Path</h3>
+                From: <select id="fromPoint">${points.map(p => `<option>${p}</option>`).join('')}</select>
+                To: <select id="toPoint">${points.map(p => `<option>${p}</option>`).join('')}</select>
+                <button onclick="findShortestPath()">Find Path</button>
+                <button onclick="clearPath()">Clear</button>
+            `;
+            document.body.appendChild(controls);
+        }
+
+        function findShortestPath() {
+            clearPath();
+            const from = document.getElementById('fromPoint').value;
+            const to = document.getElementById('toPoint').value;
+
+            // Dijkstra's algorithm
+            const distances = {};
+            const prev = {};
+            const queue = new Set(Object.keys(graph));
+            
+            for (const vertex in graph) {
+                distances[vertex] = Infinity;
+                prev[vertex] = null;
+            }
+            distances[from] = 0;
+
+            while (queue.size) {
+                let u = null;
+                let minDist = Infinity;
+                for (const v of queue) {
+                    if (distances[v] < minDist) {
+                        minDist = distances[v];
+                        u = v;
+                    }
+                }
+                
+                if (u === to || u === null) break;
+                queue.delete(u);
+
+                for (const v in graph[u]) {
+                    const alt = distances[u] + graph[u][v];
+                    if (alt < distances[v]) {
+                        distances[v] = alt;
+                        prev[v] = u;
+                    }
+                }
+            }
+
+            // Reconstruct path
+            const path = [];
+            let current = to;
+            while (current !== null) {
+                path.unshift(current);
+                current = prev[current];
+            }
+
+            if (path.length < 2) {
+                alert("No path found!");
+                return;
+            }
+
+            highlightPath(path);
+        }
+
+        function highlightPath(path) {
+            for (let i = 0; i < path.length - 1; i++) {
+                const start = path[i];
+                const end = path[i+1];
+                
+                const connection = polylines.find(p => 
+                    (p.start === start && p.end === end) || 
+                    (p.start === end && p.end === start)
+                );
+                
+                if (connection) {
+                    connection.polyline.setOptions({
+                        strokeColor: "#FF0000",
+                        strokeWeight: 6
+                    });
+                }
+            }
+            highlightedPath = path;
+        }
+
+        function clearPath() {
+            if (highlightedPath) {
+                polylines.forEach(p => p.polyline.setOptions({
+                    strokeColor: "#0000FF",
+                    strokeWeight: 3
+                }));
+                highlightedPath = null;
+            }
+        }
+
+        window.gm_authFailure = () => alert("Google Maps failed to load!");
+    </script>
+</head>
+<body>
+    <div id="map"></div>
+</body>
+</html>
